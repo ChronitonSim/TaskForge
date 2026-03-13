@@ -19,3 +19,10 @@ add_executable(01_sequential src/01_sequential/main.cpp)
 # Executable 2: Naive Threads
 add_executable(01_naive_threads src/01_naive_threads/main.cpp)
 target_link_libraries(01_naive_threads PRIVATE Threads::Threads)
+
+# Executable 3: Basic Thread Pool
+add_executable(02_basic_pool 
+    src/02_basic_pool/main.cpp 
+    src/02_basic_pool/ThreadPool.cpp
+)
+target_link_libraries(02_basic_pool PRIVATE Threads::Threads)
