@@ -26,3 +26,10 @@ add_executable(02_basic_pool
     src/02_basic_pool/ThreadPool.cpp
 )
 target_link_libraries(02_basic_pool PRIVATE Threads::Threads)
+
+# Executable 4: Future-Based Thread Pool (Phase 3)
+add_executable(03_future_pool 
+    src/03_future_pool/main.cpp 
+    src/03_future_pool/ThreadPool.cpp
+)
+target_link_libraries(03_future_pool PRIVATE Threads::Threads)
