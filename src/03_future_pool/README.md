@@ -44,6 +44,18 @@ tasks_.emplace([task]() {
 ```
 When `(*task)()` runs on the worker thread, the `packaged_task` captures the specific `return_type` internally and routes it to the client's `std::future`.
 
+## The Execution Flow: Main vs. Worker Threads
+
+To fully appreciate the Asynchronous Return Channel, we must trace the exact choreography of a task from submission to retrieval:
+
+1. **Submission (Main Thread):** The caller invokes `pool.enqueue(calculate_pi_chunk, chunk)`. 
+2. **Packaging:** Inside `enqueue`, the function and arguments are bound, wrapped in a `std::packaged_task`, allocated on the heap via `std::make_shared`, and the `std::future` is extracted.
+3. **Queuing:** The main thread briefly locks the queue, asserts the pool is active, pushes the void-returning lambda (which captures the `shared_ptr`), releases the lock, and signals the condition variable. The future is returned to the client.
+4. **Execution (Worker Thread):** A sleeping worker wakes up, locks the queue, extracts the lambda, and releases the lock. 
+5. **Fulfillment:** The worker executes `(*task)()`. The `packaged_task` runs the Monte Carlo simulation. Upon completion, it securely writes the integer result into the future's shared state and signals that the data is ready.
+6. **Memory Reclaim:** As the worker's `while` loop iterates, the local `task` variable goes out of scope. The `std::shared_ptr` reference count drops to zero, deterministically freeing the heap-allocated `packaged_task`.
+7. **Retrieval (Main Thread):** The client eventually calls `fut.get()`. If the worker has already finished step 5, it returns instantly. If not, the main thread safely blocks until the `packaged_task` signals completion.
+
 ## Architectural Benefits vs. Trade-offs
 
 **The Benefits:**
