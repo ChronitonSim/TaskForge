@@ -33,3 +33,9 @@ add_executable(03_future_pool
     src/03_future_pool/ThreadPool.cpp
 )
 target_link_libraries(03_future_pool PRIVATE Threads::Threads)
+
+# Executable 5: Hardware Cache Alignment Benchmark (Phase 4)
+add_executable(04_hpc_aligned 
+    src/04_hpc_aligned/main.cpp 
+)
+target_link_libraries(04_hpc_aligned PRIVATE Threads::Threads)
