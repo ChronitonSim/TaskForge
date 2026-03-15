@@ -114,3 +114,58 @@ By the time the main thread has finished all administrative abstraction work, th
 Instead of performing two separate allocations (one for the object, one for the reference count), `std::make_shared` guarantees a single, contiguous heap allocation. Furthermore, modern Linux memory allocators utilize Thread-Caching (`tcache`), allowing the main thread to pull memory directly from a hot, lock-free cache, significantly driving down the latency of the 1,000 enqueue operations.
 
 **Summary:** The abstraction overhead is hidden because it is astronomically small compared to the math, and the main thread front-loads all of those tiny allocations simultaneously while the 22 worker cores are already busy crunching the massive calculations.
+
+---
+
+## Phase 4: Hardware Cache Alignment & False Sharing
+
+### Architecture & Objective: False Sharing and Cache Coherence
+
+This final phase steps outside of software engineering to address a catastrophic hardware-level bottleneck: **False Sharing**. 
+
+**The Theory:** Modern CPUs fetch memory in 64-byte contiguous blocks called *Cache Lines*. To maintain data consistency across multiple cores, Intel processors employ a cache coherence protocol (typically MESI: Modified, Exclusive, Shared, Invalid). Crucially, MESI enforces coherence at the *cache line granularity*, not the individual variable granularity. 
+
+False sharing occurs when independent threads modify distinct, logically isolated variables that happen to reside on the same 64-byte cache line. When Core A writes to its variable, the MESI protocol marks the entire cache line as *Modified* and broadcasts an *Invalidate* signal. Core B, attempting to write to its own adjacent variable, suffers a cache miss and must expensively re-fetch the entire line from the L3 cache. The cores are not sharing data, but they are fighting over a physical address boundary, creating a relentless invalidation storm that cripples execution speed.
+
+**The Objective:** We demonstrate this phenomenon using a dedicated benchmark (`04_hpc_aligned`) where 22 threads continuously increment independent integers. We will compare the catastrophic performance of a tightly packed array against a structure padded to the CPU's exact cache line size, physically forcing L1 cache isolation.
+
+### The Thread Pool Defense: Local Accumulation
+A crucial architectural question arises: why didn't False Sharing destroy the performance of our Thread Pool in Phases 1 through 3?
+
+The answer lies in how the Monte Carlo workload was structured. Inside `calculate_pi_chunk`, the `num_points_inside` counter was declared as a local variable. Because it was local, the compiler kept it securely within a hardware CPU register for the entire $15.8$ ms duration of the loop. The thread only wrote its final result to the shared memory structures *exactly once* at the very end of the task. 
+
+This pattern is known as **Local Accumulation**. By accumulating state locally and committing globally only when finished, the Thread Pool naturally bypassed the hardware trap. To truly demonstrate the devastating effects of the MESI protocol, this Phase 4 benchmark specifically forces threads to aggressively and continuously write directly to shared memory.
+
+### Implementation Notes
+
+*(Note: The `volatile` keyword in the structs below is critical. Without it, the GCC/Clang optimizer would recognize the loop and collapse the $100,000,000$ increments into a single `value += 100000000` instruction. `volatile` forces the CPU to execute a real L1 cache memory write on every single iteration, guaranteeing hardware contention).*
+
+**1. The Packed Struct (Triggering False Sharing)**
+```cpp
+struct PackedResult {
+    volatile std::size_t value{0}; // 8 bytes
+};
+```
+Eight of these structs fit perfectly into a single 64-byte cache line. When we allocate `std::vector<PackedResult> packed_array(22)`, we pack the thread targets perfectly adjacent to each other.
+
+**2. The Aligned Struct (Defeating False Sharing)**
+```cpp
+struct AlignedResult {
+    alignas(std::hardware_destructive_interference_size) volatile std::size_t value{0};
+};
+```
+Using C++17's `alignas` coupled with `std::hardware_destructive_interference_size` ensures true platform portability. The compiler automatically injects 56 bytes of invisible padding, forcing every `AlignedResult` to occupy its own isolated cache line.
+
+### Benchmark Results (100,000,000 iterations per thread)
+
+| Memory Layout | Size per Element | Execution Time (ms) | Variance (ms) | Speedup |
+| :--- | :--- | :--- | :--- | :--- |
+| Packed Array (False Sharing) | 8 bytes | ~1198 | ± 35 | 1.00x |
+| Cache-Aligned Array (Isolated) | 64 bytes | ~116 | ± 2 | **~10.32x** |
+
+### Architectural Analysis: The Invalidation Storm
+The `alignas` defense yielded a massive **~10.32x hardware speedup**. 
+
+1. **The Cost of Cache Contention:** In the tightly packed array, the CPU spent roughly 116 ms actually computing the mathematical increments, and a staggering 1,082 ms stalled. The cores were trapped in an invalidation storm, continuously halting their execution pipelines while waiting for the L3 cache to arbitrate ownership of the memory block.
+2. **Sacrificing RAM for Throughput:** By padding the struct out to 64 bytes, we intentionally wasted 1,232 bytes of system RAM ($22 \times 56$ bytes of padding). In exchange for this microscopic memory footprint, we completely decoupled the L1 caches. The invalidation broadcasts dropped to zero, allowing the silicon to run unthrottled.
+3. **Restoring Determinism:** The variance plunged from ± 35 ms down to an incredibly tight ± 2 ms. By removing the unpredictable OS-level hardware contention, the execution profile became perfectly predictable.
