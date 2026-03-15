@@ -56,6 +56,16 @@ To fully appreciate the Asynchronous Return Channel, we must trace the exact cho
 6. **Memory Reclaim:** As the worker's `while` loop iterates, the local `task` variable goes out of scope. The `std::shared_ptr` reference count drops to zero, deterministically freeing the heap-allocated `packaged_task`.
 7. **Retrieval (Main Thread):** The client eventually calls `fut.get()`. If the worker has already finished step 5, it returns instantly. If not, the main thread safely blocks until the `packaged_task` signals completion.
 
+### The Memory Lifecycle: Tracing the Reference Count
+To rigorously guarantee memory safety, we can track the exact reference count (`ref_count`) of the `std::shared_ptr` holding the `packaged_task` throughout this execution flow:
+
+* **Allocation:** `make_shared` constructs the block. (`ref_count = 1`)
+* **Capture:** The void-returning lambda captures `task` by value, invoking the copy constructor before pushing to the queue. (`ref_count = 2`)
+* **Enqueue Returns:** The local `task` variable inside the `enqueue` function goes out of scope and is destroyed. The queue now holds the sole reference. (`ref_count = 1`)
+* **Worker Extraction:** The worker thread executes `task = std::move(tasks_.front());`. Move semantics transfer ownership of the lambda's memory to the local worker variable without copying the `shared_ptr`. (`ref_count = 1`)
+* **Queue Pop:** `tasks_.pop()` destroys the moved-from, empty node in the queue. (`ref_count = 1`)
+* **Destruction:** The `worker_loop` is an infinite `while(true)` loop, and the `std::function<void()> task;` is declared *inside* it. When the execution of `task()` finishes and the loop iteration hits its closing brace `}`, the local `task` variable goes out of scope. (`ref_count = 0`). The heap-allocated `packaged_task` is deterministically destroyed before the thread sleeps.
+
 ## Architectural Benefits vs. Trade-offs
 
 **The Benefits:**
