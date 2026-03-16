@@ -129,16 +129,27 @@ False sharing occurs when independent threads modify distinct, logically isolate
 
 **The Objective:** We demonstrate this phenomenon using a dedicated benchmark (`04_hpc_aligned`) where 22 threads continuously increment independent integers. We will compare the catastrophic performance of a tightly packed array against a structure padded to the CPU's exact cache line size, physically forcing L1 cache isolation.
 
-### The Thread Pool Defense: Local Accumulation
-A crucial architectural question arises: why didn't False Sharing destroy the performance of our Thread Pool in Phases 1 through 3?
+### Retrospective: False Sharing in the Thread Pool
+A crucial architectural question arises: why didn't False Sharing destroy the performance of our Thread Pool in Phases 2 and 3?
 
-The answer lies in how the Monte Carlo workload was structured. Inside `calculate_pi_chunk`, the `num_points_inside` counter was declared as a local variable. Because it was local, the compiler kept it securely within a hardware CPU register for the entire $15.8$ ms duration of the loop. The thread only wrote its final result to the shared memory structures *exactly once* at the very end of the task. 
+**Phase 2 Defense: Local Accumulation**
+In Phase 2, we passed a pre-allocated `std::vector<std::size_t>` to the workers. Since vectors are contiguous, the 8-byte results physically shared cache lines. However, inside `calculate_pi_chunk`, the `points_inside` counter was a local variable, kept securely in a CPU register for the entire 15.8 ms loop. The thread only wrote to the shared memory array *exactly once* at the very end of the task. 
 
-This pattern is known as **Local Accumulation**. By accumulating state locally and committing globally only when finished, the Thread Pool naturally bypassed the hardware trap. To truly demonstrate the devastating effects of the MESI protocol, this Phase 4 benchmark specifically forces threads to aggressively and continuously write directly to shared memory.
+This pattern is **Local Accumulation**. Quantitatively, for 1,000 tasks, we incurred only 1,000 writes to the shared vector. Assuming a conservative 100 ns penalty per MESI invalidation:
+1000 writes * 100 ns = 100,000 ns = 0.1 ms
+The false sharing penalty was a microscopic 0.1 ms. Had we scaled the workload to 10,000,000 micro-chunks, the cache invalidation penalty would have exploded to a full 1.0 second (10,000,000 * 100 ns), proving that memory layout becomes paramount at scale.
 
-### Implementation Notes
+**Phase 3 Defense: Heap Dispersion & Asynchronous Separation**
+Phase 3 introduced a `std::vector<std::future<std::size_t>>`. While the futures themselves are tightly packed in the contiguous vector, the asynchronous architecture naturally defeated false sharing by decoupling the read and write destinations:
+1. **The Write Destination:** Worker threads do not write to the contiguous `std::future` objects. They write to the hidden `std::packaged_task` "Shared State", dynamically allocated on the heap via `std::make_shared`. These shared states are large (often >64 bytes) and pseudo-randomly scattered across system memory by the OS allocator. The 22 cores wrote to widely dispersed, physically isolated memory addresses, completely preventing cache line overlap.
+2. **The Read Destination:** The contiguous array of futures is only ever accessed by the single main thread calling `fut.get()`. With no concurrent writes to the vector, the MESI protocol remains dormant.
 
-*(Note: The `volatile` keyword in the structs below is critical. Without it, the GCC/Clang optimizer would recognize the loop and collapse the $100,000,000$ increments into a single `value += 100000000` instruction. `volatile` forces the CPU to execute a real L1 cache memory write on every single iteration, guaranteeing hardware contention).*
+Ironically, the heavy abstraction overhead of `std::future` unintentionally provided perfect hardware isolation.
+
+### Implementation Notes: The Standalone Benchmark
+To truly demonstrate the devastating effects of the MESI protocol without the protective abstractions of our pool, the following benchmark forces threads to continuously write directly to shared memory.
+
+*(Note: The `volatile` keyword in the structs below is critical. Without it, the GCC/Clang optimizer would recognize the loop and collapse the 100,000,000 increments into a single `value += 100000000` instruction. `volatile` forces the CPU to execute a real L1 cache memory write on every single iteration, guaranteeing hardware contention).*
 
 **1. The Packed Struct (Triggering False Sharing)**
 ```cpp
