@@ -3,7 +3,7 @@ project(TaskForge VERSION 1.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Enforce Modern C++
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF) # Disable compiler-specific extensions (e.g., gnu++17)
 
@@ -39,3 +39,10 @@ add_executable(04_hpc_aligned
     src/04_hpc_aligned/main.cpp 
 )
 target_link_libraries(04_hpc_aligned PRIVATE Threads::Threads)
+
+# Executable 6: C++20 jthread Pool (Phase 5)
+#add_executable(05_jthread_pool 
+    # src/05_jthread_pool/main.cpp 
+    # src/05_jthread_pool/ThreadPool.cpp
+#)
+#target_link_libraries(05_jthread_pool PRIVATE Threads::Threads)
