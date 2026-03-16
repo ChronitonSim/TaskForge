@@ -11,8 +11,8 @@ int main() {
 
     constexpr std::size_t NUM_SAMPLES = 100'000'000;
 
-    // dynamic load balancing via over-subscription
-    // we create significantly more tasks than we have threads
+    // Dynamic load balancing via over-subscription;
+    // we create significantly more tasks than we have threads.
     constexpr std::size_t NUM_TASKS = 1000;
     constexpr std::size_t NUM_SAMPLES_PER_TASK = NUM_SAMPLES / NUM_TASKS;
     constexpr std::size_t REMAINDER = NUM_SAMPLES % NUM_TASKS;
@@ -22,10 +22,6 @@ int main() {
     std::cout << "Starting thread-pool Monte Carlo with " << NUM_THREADS
               << "threads and " << NUM_TASKS << " tasks.\n";
 
-    // vector to hold the results of each micro-chunk
-    // pre-allocate and initialize to avoid data races during insertion
-    std::vector<std::size_t> results(NUM_TASKS, 0);
-
     Timer timer;
 
     std::size_t num_points_inside_circle = 0;
@@ -34,7 +30,7 @@ int main() {
         ThreadPool pool(NUM_THREADS);
 
         // std::vector to hold the future tickets returned
-        // by the thread pool
+        // by the thread pool.
         std::vector<std::future<std::size_t>> futures;
         futures.reserve(NUM_TASKS);
 
