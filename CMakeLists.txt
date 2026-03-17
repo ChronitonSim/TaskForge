@@ -41,8 +41,8 @@ add_executable(04_hpc_aligned
 target_link_libraries(04_hpc_aligned PRIVATE Threads::Threads)
 
 # Executable 6: C++20 jthread Pool (Phase 5)
-#add_executable(05_jthread_pool 
-    # src/05_jthread_pool/main.cpp 
-    # src/05_jthread_pool/ThreadPool.cpp
-#)
-#target_link_libraries(05_jthread_pool PRIVATE Threads::Threads)
+add_executable(05_jthread_pool 
+    src/05_jthread_pool/main.cpp 
+    src/05_jthread_pool/ThreadPool.cpp
+)
+target_link_libraries(05_jthread_pool PRIVATE Threads::Threads)
