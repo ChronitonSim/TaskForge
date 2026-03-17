@@ -180,3 +180,25 @@ The `alignas` defense yielded a massive **~10.32x hardware speedup**.
 1. **The Cost of Cache Contention:** In the tightly packed array, the CPU spent roughly 116 ms actually computing the mathematical increments, and a staggering 1,082 ms stalled. The cores were trapped in an invalidation storm, continuously halting their execution pipelines while waiting for the L3 cache to arbitrate ownership of the memory block.
 2. **Sacrificing RAM for Throughput:** By padding the struct out to 64 bytes, we intentionally wasted 1,232 bytes of system RAM ($22 \times 56$ bytes of padding). In exchange for this microscopic memory footprint, we completely decoupled the L1 caches. The invalidation broadcasts dropped to zero, allowing the silicon to run unthrottled.
 3. **Restoring Determinism:** The variance plunged from ± 35 ms down to an incredibly tight ± 2 ms. By removing the unpredictable OS-level hardware contention, the execution profile became perfectly predictable.
+
+## Phase 5: Modernizing with C++20 `std::jthread` and Stop Tokens
+
+### Architecture & Objective
+The objective of Phase 5 is to elevate the codebase to the C++20 standard, specifically targeting thread lifecycle management. In earlier phases, safely shutting down the pool required a delicate, manual choreography of a boolean `stop_` flag, mutex locking, and `notify_all()` broadcasts to prevent the "Deadlock of the Sleeping Worker."
+
+This phase replaces `std::thread` with `std::jthread`, which guarantees automatic joining upon destruction. Furthermore, the manual shutdown logic is completely eliminated by integrating C++20's `std::stop_token`. To facilitate this, `std::condition_variable` was upgraded to `std::condition_variable_any`, allowing the worker threads to suspend and wake up natively based on the pool's destruction state.
+
+### Benchmark Results (Averaged over 5 runs)
+*Total samples: 100,000,000. Divided into 1,000 tasks.*
+
+| Implementation | Threads | Execution Time (ms) | Variance (ms) |
+| :--- | :--- | :--- | :--- |
+| Future-Based Pool (Phase 3) | 22 | 1274 | ± 11 |
+| C++20 jthread Pool (Phase 5) | 22 | 1304 | ± 17 |
+
+### Architectural Analysis: The Cost of Developer Safety
+The benchmark reveals a consistent performance regression of **~30 milliseconds** (a 2.3% overhead) compared to the C++17 implementations. This marks our first architectural change where a higher-level abstraction demonstrably reduced bare-metal throughput.
+
+1. **The Weight of `condition_variable_any`:** The standard `std::condition_variable` is fiercely optimized by compiler developers to map directly to bare-metal OS synchronization primitives (like `pthread_cond_t`), as it only accepts a `std::unique_lock<std::mutex>`. Upgrading to `condition_variable_any` provides type-erased flexibility to accept any lockable type, but introduces heavier internal state management.
+2. **Hidden Callback Management:** When `condition_.wait(lock, stoken, predicate)` is invoked, the C++20 standard library dynamically registers a hidden `std::stop_callback` to the `std::stop_token` before putting the thread to sleep. When the thread wakes up normally to process a task, it must safely deregister and destroy that callback. Across 22 threads constantly hitting an empty queue, these hidden atomic reference counts and memory barriers take a measurable toll.
+3. **Conclusion:** This phase highlights the quintessential systems engineering trade-off: **Developer Safety vs. Bare-Metal Performance.** We traded a relatively small 2.3% performance hit for the complete elimination of manual teardown logic, certainty against shutdown deadlocks, and a strictly RAII-compliant codebase. In an enterprise environment outside of strict real-time latency budgets, this is a highly favorable trade.
