@@ -46,3 +46,14 @@ add_executable(05_jthread_pool
     src/05_jthread_pool/ThreadPool.cpp
 )
 target_link_libraries(05_jthread_pool PRIVATE Threads::Threads)
+
+# Executable 7: SIMD Vectorization (Phase 6)
+add_executable(06_simd_vectorization 
+    src/06_simd_vectorization/main.cpp 
+    src/06_simd_vectorization/ThreadPool.cpp
+)
+target_link_libraries(06_simd_vectorization PRIVATE Threads::Threads)
+
+# GCC/Clang require Thread Building Blocks (TBB) for <execution> header parallel algorithms
+find_package(TBB REQUIRED)
+target_link_libraries(06_simd_vectorization PRIVATE TBB::tbb)
