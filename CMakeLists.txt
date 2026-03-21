@@ -7,6 +7,21 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF) # Disable compiler-specific extensions (e.g., gnu++17)
 
+# Force Release mode for aggressive -O3 optimizations
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    message(STATUS "Setting build type to 'Release' (-O3 optimizations enabled)")
+endif()
+
+# --- Enable Compiler Diagnostics for Vectorization ---
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    # GCC flag: Prints successful vectorization loops
+    add_compile_options(-fopt-info-vec-optimized)
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Clang flags: Prints loop vectorization and unrolling details
+    add_compile_options(-Rpass=loop-vectorize -Rpass=unroll)
+endif()
+
 # Make sure the compiler can find our header files
 include_directories(include)
 
