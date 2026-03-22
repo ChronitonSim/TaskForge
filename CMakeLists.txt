@@ -69,6 +69,5 @@ add_executable(06_simd_vectorization
 )
 target_link_libraries(06_simd_vectorization PRIVATE Threads::Threads)
 
-# GCC/Clang require Thread Building Blocks (TBB) for <execution> header parallel algorithms
-find_package(TBB REQUIRED)
-target_link_libraries(06_simd_vectorization PRIVATE TBB::tbb)
+# --- RNG Isolation Benchmark ---
+add_executable(rng_benchmark src/rng_benchmark.cpp)
