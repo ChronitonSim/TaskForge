@@ -70,13 +70,17 @@ The x86-64 AVX2 architecture contains 16 YMM registers (`ymm0` through `ymm15`).
 
 Because 13 is safely below the 16-register limit, all data remains instantly accessible in the silicon. If the compiler aggressively unrolled by 8, it would require 25 registers (`3 * 8 + 1`). Lacking physical space, the CPU would be forced to temporarily evict ("spill") intermediate calculations out of the registers and into the L1 cache. This phenomenon, known as "Register Spilling," introduces severe memory latency and destroys pipeline momentum. By capping the unroll factor at 4, the compiler intelligently saturates the FMA (Fused Multiply-Add) execution ports without overflowing the physical silicon.
 
-### 4. The Vectorization Engine: `std::transform_reduce`
-To perform the math, we replace manual loops with `std::transform_reduce` from the `<numeric>` header. It operates as a high-performance, two-stage assembly line:
-1. **Transform (Map):** It maps our condition `(x * x + y * y <= 1.0f) ? 1 : 0` over the arrays.
-2. **Reduce (Sum):** It folds those binary results into a single running total using `std::plus<>{}`.
+### 4. The Abstraction Penalty: TBB vs. Raw Auto-Vectorization
+Initially, this project utilized `std::transform_reduce` with the `std::execution::unseq` policy to force vectorization. However, this execution policy quietly delegates the math to the Intel Thread Building Blocks (TBB) backend.
 
-**The Execution Policy: `std::execution::unseq`**
-By passing the `unseq` (Unsequenced) policy from the `<execution>` header, we guarantee that the loop iterations are completely independent, share no state, and allocate no memory. This releases the compiler from sequential-execution constraints, authorizing its auto-vectorizer to apply the unrolling and AVX hardware mapping described above.
+**The TBB Anomaly:**
+Applying an industrial-strength partitioning library designed for millions of heap-allocated elements to a microscopic, 4KB stack-resident array introduced massive administrative overhead. Furthermore, it exposed a type-casting anomaly within the backend's horizontal reduction tree, leading to garbage bits corrupting the accumulator and resulting in incorrect Pi calculations.
+
+**The Solution: Compiler Auto-Vectorization**
+We stripped away the TBB abstraction in favor of a raw C++ `for` loop. When compiled with `-O3`, the compiler's Cost Model automatically unrolls and vectorizes this loop. 
+
+**Portability and Pointer Aliasing:**
+Remarkably, we achieved this without writing a single hardware-specific intrinsic or using compiler-specific `__restrict__` extensions. Compilers often refuse to vectorize loops due to "Pointer Aliasing" (the fear that arrays might overlap in memory). However, because our accumulator is a standalone float variable, the static analyzer can prove it cannot overlap with a 4KB `std::array`. Thus, it safely and aggressively vectorizes the loop, making this architecture 100% portable across Intel AVX, ARM NEON, or Apple Silicon architectures.
 
 ## The Execution Flow
 
@@ -84,5 +88,5 @@ By passing the `unseq` (Unsequenced) policy from the `<execution>` header, we gu
 2. **Worker Awakening:** A worker thread pulls the task from the queue and enters the payload function.
 3. **Stack Initialization:** The worker allocates two 4KB `std::array` buffers on its local stack for X and Y coordinates, perfectly aligned for AVX.
 4. **Sequential Batching:** The worker enters a `while` loop, processing the 100,000 samples in bite-sized batches of 1024. It uses the Mersenne Twister to sequentially fill the X and Y arrays with random floats.
-5. **SIMD Evaluation:** The worker calls `std::transform_reduce(std::execution::unseq, ...)`. The CPU loads the X and Y arrays into its wide vector registers, simultaneously calculating multiple data points per clock cycle, and summing the points that fall inside the circle.
+5. **Auto-Vectorized Evaluation:** The worker iterates through the arrays using a raw `for` loop. Under `-O3` optimization, the CPU loads the X and Y arrays into its wide vector registers, simultaneously calculating multiple data points per clock cycle, and summing the points that fall inside the circle.
 6. **Accumulation & Return:** The batch results are accumulated. Once all 100,000 samples are processed, the total is seamlessly returned to the main thread via the `std::future` channel.

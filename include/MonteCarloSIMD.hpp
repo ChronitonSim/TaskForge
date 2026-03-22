@@ -1,12 +1,8 @@
 #pragma once
 
 #include <cstddef>
-#include <execution>
-#include <numeric>
 #include <random>
 #include <array>
-#include <numeric>
-#include <execution>
 
 inline std::size_t calculate_pi_chunk_simd(std::size_t num_samples){
 
@@ -40,20 +36,20 @@ inline std::size_t calculate_pi_chunk_simd(std::size_t num_samples){
         }
 
         // SIMD-vectorized evaluation.
-        // std::execution::unseq authorizes the compiler
-        // to use AVX/SSE vector lanes.
-        std::size_t num_points_inside_batch = std::transform_reduce(
-            std::execution::unseq,  // execution policy
-            x_vals.begin(), x_vals.end() + current_batch_size,  // ranges to apply the transformation to
-            y_vals.begin(),
-            0ULL,  // initial accumulator value
-            std::plus<>{},  // reduction operation (summing the results of the transformation)
-            [](float x, float y) -> size_t {  // transformation operation
-                return (x*x + y*y <= 1.0f) ? 1 : 0;
-            }                  
-        );
+        // We avoid std::transform_reduce to avoid TBB backend anomalies.
+        // -O3 will automatically unroll and vectorize this raw loop using AVX.
+        float num_points_inside_batch = 0.0f;
+        
+        for (std::size_t i = 0; i < current_batch_size; ++i) {
+            float x = x_vals[i];
+            float y = y_vals[i];
+            
+            // The compiler easily translates this directly into a vcmpleps 
+            // (Vector Compare Less-Than-or-Equal) SIMD instruction.
+            num_points_inside_batch += (x * x + y * y <= 1.0f) ? 1.0f : 0.0f;
+        }
 
-        num_points_inside += num_points_inside_batch;
+        num_points_inside += static_cast<std::size_t>(num_points_inside_batch);
         remaining -= current_batch_size;
     }
 
