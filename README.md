@@ -277,6 +277,17 @@ Even when fully unrolled and packed into 256-bit AVX2 registers by the `-O3` opt
 
 The analysis definitively maps the 49 ms boundary. The execution time is distributed across the memory bus and SIMD math (~59%), the sequential RNG bit-shifting (~31%), and the Thread Pool administration (~10%).
 
+### Future Investigations: The Missing 8x Speedup and The Memory Wall
+
+While SIMD vectorization successfully reduced execution time to 49 ms, it did not achieve the theoretical 8x linear speedup promised by packing eight 32-bit `float` operations into a 256-bit AVX2 register. This discrepancy exposes two critical realities of modern CPU architecture that warrant future profiling:
+
+1. **The Superscalar Baseline:** The theoretical 8x speedup assumes a strictly scalar baseline. However, the non-SIMD benchmark was already heavily optimized by `-O3`. Modern Intel processors feature superscalar execution pipelines, meaning the hardware scheduler was already dynamically dispatching 3 to 4 independent scalar floating-point instructions per clock cycle. The transition to an 8-lane SIMD register is therefore physically closer to a 2x or 2.5x hardware multiplier.
+2. **The Memory Wall Hypothesis:** CPUs execute math significantly faster than they fetch memory. Processing 100,000,000 coordinate pairs requires pushing 800 Megabytes of floating-point data through the L1 cache. It is highly probable that the AVX2 execution ports spent fractions of a nanosecond sitting idle, starved for data while waiting for the memory bus. In this case, we would have effectively shifted the system from being *Compute-Bound* to *Memory-Bandwidth Bound*.
+3. **The Horizontal Reduction Tax:** At the end of every vectorized batch, the 8 independent SIMD lanes must be mathematically folded back into a single scalar counter. This "horizontal reduction" requires a sequence of shuffle and unpack instructions that disrupt pipeline momentum.
+
+**Proposed Methodology for Isolation:**
+To definitively prove whether the 29 ms SIMD execution time is dominated by L1 cache latency (The Memory Wall) or pure ALU computation speed, the next architectural step is to build a **Data Re-use Microbenchmark**. By generating a single 4KB `std::array` of floats *once* and executing the SIMD math loop over that permanently hot, cache-resident array 100,000 times, we can completely eliminate memory-fetch latency. If the execution time drops from 29 ms to single digits, the Memory Wall hypothesis is empirically proven.
+
 ## Conclusion: Project Retrospective
 
 TaskForge evolved from a naive multithreaded benchmark into a production-grade, hardware-aware task queue, following an architectural progression:
