@@ -1,5 +1,5 @@
 # TaskForge
-A high-performance C++17 thread pool. Documents the architectural evolution and benchmarking from naive thread spawning to a cache-optimized, lock-aware task queue.
+A high-performance C++ compute engine and architectural study. Documents the progressive optimization of a CPU-bound workload through Thread-Level dynamic load balancing, MESI-aware cache alignment, and Instruction-Level SIMD vectorization. Provides a rigorous latency analysis of modern C++17/C++20 abstractions against the limits of heterogeneous silicon.
 
 ## System Specifications
 To ensure benchmark reproducibility and accurate architectural analysis, all tests are executed under the following hardware and software constraints:
@@ -28,10 +28,10 @@ Two executables were developed:
 
 ### Benchmark Results (-O0, Averaged over 5 runs)
 
-| Implementation | Threads | Execution Time (ms) | Variance (ms) | Speedup |
-| :--- | :--- | :--- | :--- | :--- |
-| Sequential Baseline | 1 | 15889 | ± 1731 | 1.00x |
-| Naive Parallel | 22 | 1488 | ± 24 | ~10.67x |
+| Implementation | Threads | Execution Time (ms) | Speedup vs Seq |
+| :--- | :--- | :--- | :--- |
+| Sequential Baseline | 1 | 15889 ± 1731 | 1.0x |
+| Naive Parallel | 22 | 1488 ± 24 | ~10.7x |
 
 ### Architectural Analysis: The Heterogeneous Bottleneck
 While a ~10.67x speedup is significant, it falls short of the theoretical 22x linear scaling. This exposes a critical flaw in naive static workload distribution on modern heterogeneous hardware.
@@ -63,10 +63,10 @@ $$T_{total} \approx \frac{W}{\sum_{i=1}^{N} P_i} + T_{overhead}$$
 ### Benchmark Results (-O0, Averaged over 5 runs)
 *Total samples: 100,000,000. Divided into 1,000 tasks.*
 
-| Implementation | Threads | Execution Time (ms) | Variance (ms) | Speedup vs Seq | Speedup vs Naive |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| Naive Parallel | 22 | 1488 | ± 24 | ~10.67x | - |
-| Basic Thread Pool | 22 | 1272 | ± 14 | ~12.49x | ~1.17x |
+| Implementation | Threads | Execution Time (ms) | Speedup vs Seq | Speedup vs Naive |
+| :--- | :--- | :--- | :--- | :--- |
+| Naive Parallel | 22 | 1488 ± 24 | ~10.7x | - |
+| Basic Thread Pool | 22 | 1272 ± 14 | ~12.5x | ~1.2x |
 
 ### Architectural Analysis: Reclaiming Lost Silicon
 The thread pool achieved a **~17% relative speedup** over the naive implementation, dropping the execution time to 1272 ms. 
@@ -90,10 +90,10 @@ Phase 3 upgrades the Thread Pool to use the **Asynchronous Return Channel** patt
 ### Benchmark Results (-O0, Averaged over 5 runs)
 *Total samples: 100,000,000. Divided into 1,000 tasks.*
 
-| Implementation | Threads | Execution Time (ms) | Variance (ms) |
+| Implementation | Threads | Execution Time (ms) | Speedup vs Seq |
 | :--- | :--- | :--- | :--- |
-| Basic Thread Pool (Raw Lambdas) | 22 | 1272 | ± 14 |
-| Future-Based Pool (Heap + Type Erasure) | 22 | 1274 | ± 11 |
+| Basic Thread Pool (Raw Lambdas) | 22 | 1272 ± 14 | ~12.5x |
+| Future-Based Pool (Heap + Type Erasure) | 22 | 1274 ± 11 | ~12.5x |
 
 ### Architectural Analysis: Hiding the Cost of Abstraction
 The transition to an asynchronous API introduced heavy abstraction overhead: 1,000 heap allocations (`std::make_shared`), multiple layers of type-erasure (`std::bind`), and smart pointer reference counting. Yet, the execution time effectively remained identical (a statistically negligible 2 ms difference). 
@@ -174,10 +174,10 @@ Using C++17's `alignas` coupled with `std::hardware_destructive_interference_siz
 
 ### Benchmark Results (-O0, 100,000,000 iterations per thread)
 
-| Memory Layout | Size per Element | Execution Time (ms) | Variance (ms) | Speedup |
-| :--- | :--- | :--- | :--- | :--- |
-| Packed Array (False Sharing) | 8 bytes | ~1198 | ± 35 | 1.00x |
-| Cache-Aligned Array (Isolated) | 64 bytes | ~116 | ± 2 | **~10.32x** |
+| Memory Layout | Size per Element | Execution Time (ms) | Speedup vs Packed |
+| :--- | :--- | :--- | :--- |
+| Packed Array (False Sharing) | 8 bytes | ~1198 ± 35 | 1.0x |
+| Cache-Aligned Array (Isolated) | 64 bytes | ~116 ± 2 | **~10.3x** |
 
 ### Architectural Analysis: The Invalidation Storm
 The `alignas` defense yielded a massive **~10.32x hardware speedup**. 
@@ -196,10 +196,10 @@ This phase replaces `std::thread` with `std::jthread`, which guarantees automati
 ### Benchmark Results (-O0, Averaged over 5 runs)
 *Total samples: 100,000,000. Divided into 1,000 tasks.*
 
-| Implementation | Threads | Execution Time (ms) | Variance (ms) |
+| Implementation | Threads | Execution Time (ms) | Speedup vs Seq |
 | :--- | :--- | :--- | :--- |
-| Future-Based Pool (Phase 3) | 22 | 1274 | ± 11 |
-| C++20 jthread Pool (Phase 5) | 22 | 1304 | ± 17 |
+| Future-Based Pool (Phase 3) | 22 | 1274 ± 11 | ~12.5x |
+| C++20 jthread Pool (Phase 5) | 22 | 1304 ± 17 | ~12.2x |
 
 ### Architectural Analysis: The Cost of Developer Safety
 The benchmark reveals a consistent performance regression of **~30 milliseconds** (a 2.3% overhead) compared to the C++17 implementations. This marks our first architectural change where a higher-level abstraction demonstrably reduced bare-metal throughput.
@@ -248,6 +248,42 @@ To conclude the project, we re-compiled all major phases using the `-O3` Release
 
 1. **The True Cost of Debug Mode:** Enabling `-O3` dropped the Sequential baseline from an agonizing **15,889 ms** down to just **618 ms**—a staggering **25x speedup** achieved solely through compiler optimization. The `-O0` benchmarks were vital for identifying latency structures, but `-O3` proves that compiler engineering often vastly outpaces manual code-level micro-optimizations.
 2. **The Thread Pool Efficacy:** Even under aggressive optimization, the Dynamic Load Balancing architecture (Phases 2 & 3) successfully outperformed Naive static distribution (Phase 1 Parallel), dropping execution time from 78 ms to 69 ms. The central queue successfully smoothed out OS scheduler interruptions and silicon heterogeneity, as evidenced by the variance shrinking from ± 7 ms down to ± 1 ms.
-3. **Amdahl's Law and the Sequential Bottleneck:** The auto-vectorization in Phase 6 dropped the execution time from 77 ms to **49 ms** (a ~36% latency reduction over Phase 5). By optimizing the mathematical evaluation into AVX registers, we drastically shifted the architectural bottleneck. The 49 ms boundary is now heavily dominated by the absolute physical speed limit of the `std::mt19937` engine generating random state arrays sequentially on this silicon. We successfully shifted the primary cost of execution from *computation* entirely to *data generation*.
+3. **The Limits of Auto-Vectorization:** The transition to SIMD vectorization in Phase 6 dropped the execution time from 77 ms to **49 ms** (a ~36% latency reduction over Phase 5). While packing mathematical operations into AVX registers yielded substantial gains, we did not achieve a theoretical 8x SIMD speedup. So, if the compiler successfully unrolled and vectorized the math, where exactly are those remaining 49 milliseconds being spent across the silicon?
 
-**TaskForge** demonstrates that achieving bare-metal C++ performance requires a holistic synergy across three domains: Thread-Level Load Balancing (to defeat heterogeneous core delays), Hardware-Level Cache Management (to prevent MESI invalidation storms), and Instruction-Level Compiler Tuning (to maximize execution port saturation).
+### Latency Analysis: Deconstructing the 49ms Boundary
+
+To discover whether random data generation is the ultimate bottleneck, we built a standalone benchmark (`rng_benchmark.cpp`) to measure the raw single-core speed of `std::mt19937` generating 100,000,000 coordinate pairs, completely isolated from the Thread Pool and SIMD math.
+
+**The Raw Measurements:**
+* **$T_{seq\_rng}$ (Sequential Single-Core RNG):** ~325 ms
+* **$T_{parallel\_rng}$ (ThreadPool + RNG, Math disabled):** ~20 ms
+* **$T_{total}$ (Full Phase 6 SIMD Execution):** ~49 ms
+
+**1. The Theoretical Generation Bound (15 ms):**
+Because the architecture utilizes thread-local RNG instances, the 100,000,000 samples are evenly distributed across 22 independent Mersenne Twister engines running concurrently. The theoretical wall-clock time for parallel generation is the time it takes a single core to generate its ~4.54 million share:
+$$325 \text{ ms} / 22 \text{ cores} \approx 15 \text{ ms}$$
+This 15 ms represents the physical speed limit of the silicon generating the random state arrays.
+
+**2. The Thread Pool Overhead (5 ms):**
+By subtracting the theoretical single-thread RNG generation time from $T_{parallel\_rng}$, we isolate the administrative cost of the architecture:
+$$20 \text{ ms (measured, ThreadPool + RNG, Math disabled)} - 15 \text{ ms (theoretical, RNG)} = 5 \text{ ms}$$
+The entire Thread Pool—including 1,000 mutex acquisitions, `condition_variable_any` wakeups, `std::stop_token` callbacks, dynamic heap allocations, and asynchronous `std::future` resolutions—costs a virtually negligible 5 milliseconds. This validates the efficiency of the lock-aware, asynchronous design.
+
+**3. The SIMD Memory & Math Latency (29 ms):**
+Finally, subtracting the generation and pool overhead from the total execution time reveals the true cost of the mathematical computation:
+$$49 \text{ ms (Total)} - 20 \text{ ms (RNG + Pool)} = 29 \text{ ms}$$
+Even when fully unrolled and packed into 256-bit AVX2 registers by the `-O3` optimizer, sweeping 800 megabytes of `float` data (100 million coordinate pairs) through the L1 cache into the Fused Multiply-Add execution ports still requires roughly 29 milliseconds of physical clock cycles.
+
+
+The analysis definitively maps the 49 ms boundary. The execution time is distributed across the memory bus and SIMD math (~59%), the sequential RNG bit-shifting (~31%), and the Thread Pool administration (~10%).
+
+## Conclusion: Project Retrospective
+
+TaskForge evolved from a naive multithreaded benchmark into a production-grade, hardware-aware task queue, following an architectural progression:
+
+* **Dynamic Load Balancing (Phases 1-2):** Replaced static workload partitioning with a centralized, lock-aware task queue. This mitigated the heterogeneous bottleneck of Meteor Lake processors, preventing fast P-cores from idling while waiting for slower E-cores.
+* **Abstraction & Lifecycle Management (Phases 3 & 5):** Integrated asynchronous return channels (`std::future`, `std::packaged_task`) and C++20 lifecycle primitives (`std::jthread`, `std::stop_token`). Profiling proved that heavy software abstractions (heap allocations, type erasure) can be entirely masked by asynchronous pipelining and payload ratios.
+* **Cache Coherence (Phase 4):** Diagnosed and mitigated MESI protocol invalidation storms (False Sharing) by padding data structures to the 64-byte hardware destructive interference size (`alignas`).
+* **Instruction-Level Parallelism (Phase 6):** Decoupled sequential RNG state mutations from parallelizable math, bypassing TBB backend overhead in favor of L1-cache-resident `std::array` buffers. This unlocked aggressive `-O3` compiler auto-vectorization and loop unrolling.
+
+Ultimately, by aligning Thread-Level load balancing, Hardware-Level cache coherence, and Instruction-Level execution, the architecture successfully reduced a 15.8-second sequential baseline down to a highly deterministic 49 milliseconds.
